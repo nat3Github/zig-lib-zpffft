@@ -1,5 +1,4 @@
 const std = @import("std");
-const assert = std.debug.assert;
 const simd_math = @import("simd_math.zig");
 
 pub fn Passes(comptime T: type) type {
@@ -44,7 +43,7 @@ pub fn PassesL(comptime T: type, comptime L: comptime_int) type {
                     2 => {
                         radf2_ps(ido, l1, in, out, wa + @as(usize, @intCast(iw)));
                     },
-                    else => std.debug.panic("rfftf1_ps: unreachable ip={}", .{ip}),
+                    else => unreachable, // ifac comes from setup.decompose, which only emits factors 2, 3, 4, 5
                 }
                 l2 = l1;
                 if (out == work2) {
@@ -88,7 +87,7 @@ pub fn PassesL(comptime T: type, comptime L: comptime_int) type {
                     2 => {
                         radb2_ps(ido, l1, in, out, wa + @as(usize, @intCast(iw)));
                     },
-                    else => std.debug.panic("rfftb1_ps: unreachable ip={}", .{ip}),
+                    else => unreachable, // ifac comes from setup.decompose, which only emits factors 2, 3, 4, 5
                 }
                 l1 = l2;
                 iw += (ip - 1) * ido;
@@ -135,7 +134,7 @@ pub fn PassesL(comptime T: type, comptime L: comptime_int) type {
                     2 => {
                         passf2_ps(idot, l1, in, out, wa + @as(usize, @intCast(iw)), fsign);
                     },
-                    else => std.debug.panic("cfftf1_ps: unreachable ip={}", .{ip}),
+                    else => unreachable, // ifac comes from setup.decompose, which only emits factors 2, 3, 4, 5
                 }
                 l1 = l2;
                 iw += (ip - 1) * idot;

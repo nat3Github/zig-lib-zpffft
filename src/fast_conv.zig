@@ -3,24 +3,31 @@ const simd = @import("simd_math.zig");
 const setup_mod = @import("setup.zig");
 
 const Setup = setup_mod.Setup(f32);
+const Error = setup_mod.Error;
 const wide = simd.wideLanes(f32);
 
-/// ab += a * b * scaling, on unordered spectra from `transform`.
-pub fn zconvolveAccumulate(setup: *Setup, a: []const f32, b: []const f32, ab: []f32, scaling: f32) void {
-    zconvolve(true, setup, a, b, ab, scaling);
+/// ab += a * b * scaling, on unordered spectra from `transform`. Buffers as for transform;
+/// ab may alias a or b.
+pub fn zconvolveAccumulate(setup: *const Setup, a: []const f32, b: []const f32, ab: []f32, scaling: f32) Error!void {
+    try zconvolve(true, setup, a, b, ab, scaling);
 }
 
-/// ab = a * b * scaling, on unordered spectra from `transform`.
-pub fn zconvolveNoAccu(setup: *Setup, a: []const f32, b: []const f32, ab: []f32, scaling: f32) void {
-    zconvolve(false, setup, a, b, ab, scaling);
+/// ab = a * b * scaling, on unordered spectra from `transform`. Buffers as for transform;
+/// ab may alias a or b.
+pub fn zconvolveNoAccu(setup: *const Setup, a: []const f32, b: []const f32, ab: []f32, scaling: f32) Error!void {
+    try zconvolve(false, setup, a, b, ab, scaling);
 }
 
-fn zconvolve(comptime accumulate: bool, setup: *Setup, a: []const f32, b: []const f32, ab: []f32, scaling: f32) void {
+fn zconvolve(comptime accumulate: bool, setup: *const Setup, a: []const f32, b: []const f32, ab: []f32, scaling: f32) Error!void {
+    for ([_][]const f32{ a, b, ab }) |buf| {
+        if (buf.len < setup.bufferLen()) return error.BufferTooSmall;
+        if (!std.mem.isAligned(@intFromPtr(buf.ptr), setup.alignment())) return error.Misaligned;
+    }
     if (wide != 4 and setup.lanes != 4) return zconvolveL(wide, accumulate, setup, a, b, ab, scaling);
     zconvolveL(4, accumulate, setup, a, b, ab, scaling);
 }
 
-fn zconvolveL(comptime L: comptime_int, comptime accumulate: bool, setup: *Setup, a: []const f32, b: []const f32, ab: []f32, scaling: f32) void {
+fn zconvolveL(comptime L: comptime_int, comptime accumulate: bool, setup: *const Setup, a: []const f32, b: []const f32, ab: []f32, scaling: f32) void {
     const s = simd.SIMDL(f32, L);
     const Ncvec: usize = @intCast(setup.Ncvec);
     const va: s.CVP = @ptrCast(@alignCast(a.ptr));

@@ -1,5 +1,4 @@
 const std = @import("std");
-const assert = std.debug.assert;
 const simd_math = @import("simd_math.zig");
 const setup_mod = @import("setup.zig");
 const passes_mod = @import("radix_passes.zig");
@@ -7,6 +6,7 @@ const wide_mod = @import("wide.zig");
 
 pub const TransformType = setup_mod.TransformType;
 pub const Direction = setup_mod.Direction;
+pub const Error = setup_mod.Error;
 
 pub fn ZPFFT(comptime T: type) type {
     const s = simd_math.SIMD(T);
@@ -18,13 +18,12 @@ pub fn ZPFFT(comptime T: type) type {
         const W = wide_mod.Wide(T, wide);
 
         /// 4-lane or wide, per setup.lanes. Returns the buffer holding the result.
-        pub fn transformInternal(setup: *const Setup, finput: [*]const T, foutput: [*]T, scratch: ?[*]Vec, direction: Direction, ordered: bool) [*]Vec {
-            const sc: [*]T = if (scratch) |p| @ptrCast(p) else foutput;
-            const res = if (wide != 4 and setup.lanes != 4)
-                run(wide, setup, finput, foutput, sc, direction, ordered)
+        /// Buffers are validated by transformImpl.
+        fn transformInternal(setup: *const Setup, finput: [*]const T, foutput: [*]T, scratch: [*]T, direction: Direction, ordered: bool) [*]T {
+            return if (wide != 4 and setup.lanes != 4)
+                run(wide, setup, finput, foutput, scratch, direction, ordered)
             else
-                run(4, setup, finput, foutput, sc, direction, ordered);
-            return @ptrCast(@alignCast(res));
+                run(4, setup, finput, foutput, scratch, direction, ordered);
         }
 
         fn run(comptime L: comptime_int, setup: *const Setup, finput: [*]const T, foutput: [*]T, scratch: [*]T, direction: Direction, ordered: bool) [*]T {
@@ -72,7 +71,7 @@ pub fn ZPFFT(comptime T: type) type {
                     const src = buff[ib];
                     const dst = buff[1 - ib];
                     const size = if (setup.transform == .Real) setup.N else 2 * setup.N;
-                    zreorder(setup, @as([*]const T, @ptrCast(src))[0..@intCast(size)], @as([*]T, @ptrCast(dst))[0..@intCast(size)], .Forward);
+                    reorder(setup, @as([*]const T, @ptrCast(src))[0..@intCast(size)], @as([*]T, @ptrCast(dst))[0..@intCast(size)], .Forward);
                     ib = 1 - ib;
                 }
             } else {
@@ -81,7 +80,7 @@ pub fn ZPFFT(comptime T: type) type {
                 if (ordered and vinput == buff[ib]) ib = 1 - ib;
                 if (reorder_pass) {
                     const size = if (setup.transform == .Real) setup.N else 2 * setup.N;
-                    zreorder(setup, @as([*]const T, @ptrCast(vinput))[0..@intCast(size)], @as([*]T, @ptrCast(buff[ib]))[0..@intCast(size)], .Backward);
+                    reorder(setup, @as([*]const T, @ptrCast(vinput))[0..@intCast(size)], @as([*]T, @ptrCast(buff[ib]))[0..@intCast(size)], .Backward);
                     input = buff[ib];
                     ib = 1 - ib;
                 }
@@ -111,34 +110,57 @@ pub fn ZPFFT(comptime T: type) type {
             return @ptrCast(buff[ib]);
         }
 
-        pub fn transform(setup: *Setup, input: []const T, output: []T, work: ?[]T, direction: Direction) void {
-            transformImpl(setup, input, output, work, direction, false);
+        /// Unordered (PFFFT internal layout) transform. input, output and work each need
+        /// setup.bufferLen() floats aligned to setup.alignment(); input == output (in place) is fine,
+        /// work must not overlap either.
+        pub fn transform(setup: *const Setup, input: []const T, output: []T, work: []T, direction: Direction) Error!void {
+            try transformImpl(setup, input, output, work, direction, false);
         }
 
-        pub fn transformOrdered(setup: *Setup, input: []const T, output: []T, work: ?[]T, direction: Direction) void {
-            transformImpl(setup, input, output, work, direction, true);
+        /// Like transform, but the spectrum is in canonical order.
+        pub fn transformOrdered(setup: *const Setup, input: []const T, output: []T, work: []T, direction: Direction) Error!void {
+            try transformImpl(setup, input, output, work, direction, true);
         }
 
-        fn transformImpl(setup: *Setup, input: []const T, output: []T, work: ?[]T, direction: Direction, ordered: bool) void {
-            const size: usize = if (setup.transform == .Real) @intCast(setup.N) else @intCast(2 * setup.N);
-            var allocated: ?[]align(64) T = null;
-            defer if (allocated) |a| setup.allocator.free(a);
-            const work_ptr: [*]T = if (work) |w| w.ptr else blk: {
-                allocated = setup.allocator.alignedAlloc(T, .@"64", size) catch @panic("FFT work allocation failed");
-                break :blk allocated.?.ptr;
-            };
+        fn transformImpl(setup: *const Setup, input: []const T, output: []T, work: []T, direction: Direction, ordered: bool) Error!void {
+            try checkBuffer(setup, input);
+            try checkBuffer(setup, output);
+            try checkBuffer(setup, work);
+            const size = setup.bufferLen();
+            if (overlaps(work[0..size], input[0..size]) or overlaps(work[0..size], output[0..size])) return error.BufferOverlap;
+            if (input.ptr != output.ptr and overlaps(input[0..size], output[0..size])) return error.BufferOverlap;
 
-            const res = transformInternal(setup, input.ptr, output.ptr, @ptrCast(@alignCast(work_ptr)), direction, ordered);
-            const fres: [*]const T = @ptrCast(res);
-            if (fres != output.ptr) @memcpy(output[0..size], fres[0..size]);
+            const res = transformInternal(setup, input.ptr, output.ptr, work.ptr, direction, ordered);
+            if (res != output.ptr) @memcpy(output[0..size], res[0..size]);
         }
 
-        pub fn zreorder(setup: *const Setup, input: []const T, output: []T, direction: Direction) void {
+        fn checkBuffer(setup: *const Setup, buf: []const T) Error!void {
+            if (buf.len < setup.bufferLen()) return error.BufferTooSmall;
+            if (!std.mem.isAligned(@intFromPtr(buf.ptr), setup.alignment())) return error.Misaligned;
+        }
+
+        fn overlaps(a: []const T, b: []const T) bool {
+            const a0 = @intFromPtr(a.ptr);
+            const b0 = @intFromPtr(b.ptr);
+            return a0 < b0 + b.len * @sizeOf(T) and b0 < a0 + a.len * @sizeOf(T);
+        }
+
+        /// Converts between the unordered and canonical layouts. Buffers as for transform;
+        /// input and output must not overlap.
+        pub fn zreorder(setup: *const Setup, input: []const T, output: []T, direction: Direction) Error!void {
+            try checkBuffer(setup, input);
+            try checkBuffer(setup, output);
+            const size = setup.bufferLen();
+            if (overlaps(input[0..size], output[0..size])) return error.BufferOverlap;
+            reorder(setup, input, output, direction);
+        }
+
+        /// zreorder without the checks: buffers are validated by the caller.
+        fn reorder(setup: *const Setup, input: []const T, output: []T, direction: Direction) void {
             const Ncvec = setup.Ncvec;
             const vin: [*]const Vec = @ptrCast(@alignCast(input.ptr));
             const vout: [*]Vec = @ptrCast(@alignCast(output.ptr));
             const N = setup.N;
-            assert(input.ptr != output.ptr);
             if (wide != 4 and setup.lanes != 4) return W.zreorder(setup, input, output, direction);
 
             if (setup.transform == .Real) {

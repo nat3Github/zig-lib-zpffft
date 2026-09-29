@@ -21,14 +21,25 @@ const pffft = @import("pffft");
 
 const setup = try pffft.Float32.Setup.init(allocator, 1024, .Real);
 defer setup.deinit();
-// input/output: 1024 floats (64-byte aligned is fastest). work = null allocates a
-// scratch buffer per call (panics on OOM); pass a 1024-float (complex: 2048) buffer to avoid it.
-pffft.Float32.transformOrdered(setup, input, output, null, .Forward);
+// input, output, work: setup.bufferLen() floats each (N real, 2N complex),
+// aligned to setup.alignment() bytes (64 always works).
+const work = try allocator.alignedAlloc(f32, .@"64", setup.bufferLen());
+defer allocator.free(work);
+try pffft.Float32.transformOrdered(setup, input, output, work, .Forward);
 ```
 
 `transform` produces PFFFT's internal (unordered) layout, which is enough for fast convolution;
 `transformOrdered` produces the canonical order. Transforms are unscaled: forward then backward
-multiplies by N. Valid sizes are those of PFFFT (N = 2^a·3^b·5^c with a minimum per transform type).
+multiplies by N. Valid sizes are those of PFFFT (N = 2^a·3^b·5^c, a multiple of 32 for real and 16
+for complex, at most `max_n` = 2^29); `Setup.init` returns `error.InvalidSize` or
+`error.InvalidFactorization` otherwise.
+
+Only `Setup.init` allocates; transforms never do, so they are safe on a real-time thread. Nothing
+panics on bad input, in any build mode: `transform`, `transformOrdered`, `zreorder` and
+`fast_conv.zconvolve*` return `error.BufferTooSmall`, `error.Misaligned` or `error.BufferOverlap`.
+In place (`input` and `output` the same slice) is supported; `work` must not overlap them, and
+`zreorder` cannot run in place. The raw-pointer functions under `zpfft`, `radix_passes` and
+`simd` are unchecked internals.
 
 Build option: `-Dsimd_lanes=4|8|16` forces the wide-path lane count (default: target vector width).
 

@@ -338,8 +338,8 @@ pub fn Wide(comptime T: type, comptime L: comptime_int) type {
             break :blk m;
         };
 
+        /// Unchecked: ZPFFT.zreorder / transformImpl validate the buffers.
         pub fn zreorder(setup: anytype, input: []const T, output: []T, direction: setup_mod.Direction) void {
-            std.debug.assert(input.ptr != output.ptr);
             const vin: CVP = @ptrCast(@alignCast(input.ptr));
             const vout: VP = @ptrCast(@alignCast(output.ptr));
             const nc: usize = @intCast(setup.Ncvec);

@@ -7,6 +7,8 @@ pub const radix_passes = @import("radix_passes.zig");
 
 pub const TransformType = setup.TransformType;
 pub const Direction = setup.Direction;
+pub const Error = setup.Error;
+pub const max_n = setup.max_n;
 
 pub const Float32 = struct {
     pub const Setup = setup.Setup(f32);
