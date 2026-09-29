@@ -1,0 +1,20 @@
+.{
+    .fingerprint = 0xd47109825b47a484,
+    .name = .zpffft,
+    .version = "0.1.0",
+    .minimum_zig_version = "0.16.0",
+    .dependencies = .{},
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src/fast_conv.zig",
+        "src/lib.zig",
+        "src/radix_passes.zig",
+        "src/setup.zig",
+        "src/simd_math.zig",
+        "src/wide.zig",
+        "src/zpfft.zig",
+        "LICENSE.txt",
+        "README.md",
+    },
+}
