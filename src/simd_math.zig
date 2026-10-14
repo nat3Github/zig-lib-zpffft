@@ -42,8 +42,7 @@ pub fn SIMDL(comptime T: type, comptime L: comptime_int) type {
         pub const VP = [*]align(A) Vec;
         pub const CVP = [*]align(A) const Vec;
 
-        pub const Union = extern union {
-            v: Vec,
+        pub const Union = extern struct {
             f: [L]T,
         };
 

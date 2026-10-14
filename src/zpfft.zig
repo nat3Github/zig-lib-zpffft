@@ -424,8 +424,8 @@ pub fn ZPFFT(comptime T: type) type {
 
         fn realFinalizeImpl(comptime ordered: bool, Ncvec: i32, in: [*]const Vec, out: [*]Vec, e: [*]const Vec) void {
             const dk: usize = @intCast(@divExact(Ncvec, 4));
-            const cr: s.Union = .{ .v = in[0] };
-            const ci: s.Union = .{ .v = in[@as(usize, @intCast(2 * Ncvec - 1))] };
+            const cr: s.Union = .{ .f = in[0] };
+            const ci: s.Union = .{ .f = in[@as(usize, @intCast(2 * Ncvec - 1))] };
             const hsqrt2 = @as(T, @floatCast(0.7071067811865476));
             const zero = s.vzero();
 
